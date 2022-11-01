@@ -13,17 +13,32 @@
 namespace audio
 {
 
+CombProcessor::CombProcessor(unsigned int _maxNumFilters) :
+    chain(2),
+    curParams(A4_FREQ, RESONANCE_DEFAULT, TIMBRE_DEFAULT, CURVE_DEFAULT, SPREAD_DEFAULT, RETUNE_DEFAULT),
+    maxNumFilters(_maxNumFilters),
+    numFilters(_maxNumFilters),
+    numChannels(2)
+{
+    freq.setCurrentAndTargetValue(A4_FREQ);
+    q.setCurrentAndTargetValue(RESONANCE_DEFAULT);
+    timbre.setCurrentAndTargetValue(TIMBRE_DEFAULT);
+    curve.setCurrentAndTargetValue(CURVE_DEFAULT);
+    spread.setCurrentAndTargetValue(SPREAD_DEFAULT);
+}
+
 CombProcessor::CombProcessor(unsigned int _maxNumFilters, int _numChannels) :
     chain(_numChannels),
+    curParams(A4_FREQ, RESONANCE_DEFAULT, TIMBRE_DEFAULT, CURVE_DEFAULT, SPREAD_DEFAULT, RETUNE_DEFAULT),
     maxNumFilters(_maxNumFilters),
-    numChannels(_numChannels),
-    numFilters(_maxNumFilters)
+    numFilters(_maxNumFilters),
+    numChannels(_numChannels)
 {
-    freq = FREQ_DEFAULT;
-    q = Q_DEFAULT;
-    timbre = TIMBRE_DEFAULT;
-    curve = CURVE_DEFAULT;
-    detune = SPREAD_DEFAULT;
+    freq.setCurrentAndTargetValue(A4_FREQ);
+    q.setCurrentAndTargetValue(RESONANCE_DEFAULT);
+    timbre.setCurrentAndTargetValue(TIMBRE_DEFAULT);
+    curve.setCurrentAndTargetValue(CURVE_DEFAULT);
+    spread.setCurrentAndTargetValue(SPREAD_DEFAULT);
 }
 
 void CombProcessor::prepare(const dsp::ProcessSpec& spec)
@@ -40,6 +55,12 @@ void CombProcessor::prepare(const dsp::ProcessSpec& spec)
     sampleRate = spec.sampleRate;
     tempBuffer.setSize(numChannels, spec.maximumBlockSize);
     outBuffer.setSize(numChannels, spec.maximumBlockSize);
+    
+    freq.reset(sampleRate, glide);
+    q.reset(sampleRate, SMOOTH_SEC);
+    timbre.reset(sampleRate, SMOOTH_SEC);
+    curve.reset(sampleRate, SMOOTH_SEC);
+    spread.reset(sampleRate, SMOOTH_SEC);
 }
 
 void CombProcessor::reset()
@@ -50,22 +71,45 @@ void CombProcessor::reset()
     
 }
 
-void CombProcessor::process(AudioBuffer<float> &buffer, int numSamples)
+void CombProcessor::process(AudioBuffer<float> &buffer, int numSamples, int startSample)
 {
     auto inWrite = buffer.getArrayOfWritePointers();
     auto tempWrite = tempBuffer.getArrayOfWritePointers();
     auto outWrite = outBuffer.getArrayOfWritePointers();
     
+    float curFreq = freq.getNextValue();
+    float curQ = q.getNextValue();
+    float curTimbre = timbre.getNextValue();
+    float curCurve = curve.getNextValue();
+    float curSpread = spread.getNextValue();
+        
+    updateParamsObject(curFreq, curQ, curTimbre, curCurve, curSpread);
+    
     // clear output buffer
     for (int ch = 0; ch < numChannels; ++ch)
+    {
         SIMD::fill(outWrite[ch], 0.0f, numSamples);
+    }
     
     // process bandpass filter for each harmonic
     for (int i = 0; i < numFilters; ++i)
     {
+        // update processors
+        if (! updateFilterSettings(curFreq, curQ, curSpread, i))
+        {
+            break;
+        }
+        
+        updateTimbre(curTimbre, i);
+        updateCurve(curCurve, curQ, i);
+            
         // copy contents of input buffer to temp buffer
+        tempBuffer.clear();
         for (int ch = 0; ch < numChannels; ++ch)
-            SIMD::copy(tempWrite[ch], inWrite[ch], numSamples);
+        {
+            auto inWritePtr = buffer.getReadPointer(ch, startSample);
+            SIMD::copy(tempWrite[ch], inWritePtr, numSamples);
+        }
         
         // process the temp buffer and add it to output buffer
         dsp::AudioBlock<float> block(tempBuffer);
@@ -83,55 +127,111 @@ void CombProcessor::process(AudioBuffer<float> &buffer, int numSamples)
     // write contents of output buffer to input buffer
     for (int ch = 0; ch < numChannels; ++ch)
         SIMD::copy(inWrite[ch], outWrite[ch], numSamples);
+    
+    // skip remaining samples for params
+    freq.skip(numSamples - 1);
+    q.skip(numSamples - 1);
+    timbre.skip(numSamples - 1);
+    curve.skip(numSamples - 1);
+    spread.skip(numSamples - 1);
 }
 
-void CombProcessor::updateParams(float freq, float q, float timbre, float curve, float detune)
+void CombProcessor::updateParams(Parameters params)
 {
-    this->freq = freq;
-    this->q = q;
-    this->timbre = timbre;
-    this->curve = curve;
-    this->detune = detune;
+    if (params.freq != -1.0f)
+        freq.setTargetValue(params.freq);
     
-    float nyquist = sampleRate / 2.0f;
+    q.setTargetValue(params.resonance);
+    timbre.setTargetValue(params.timbre);
+    curve.setTargetValue(params.curve);
+    spread.setTargetValue(params.spread);
+    glide = params.glide / 1000.0f;
+    mode = params.mode;
     
-    for (int i = 0; i < maxNumFilters; ++i)
+    if (glide != lastGlide)
     {
-        if (getCurFreq(i) >= nyquist)
-        {
-            numFilters = i;
-            return;
-        }
-    
-        updateFilterSettings(i);
-        updateTimbre(i);
-        updateCurve(i);
+        freq.reset(sampleRate, glide);
+        lastGlide = glide;
     }
 }
 
-
-
-
-
-void CombProcessor::updateFilterSettings(int i)
+CombProcessor::Parameters& CombProcessor::getParams()
 {
-    float curFreq, curQ;
-    curFreq = getCurFreq(i);
-    curQ = q * (float(i) / 2.f + 1);
+    return curParams;
+}
+
+void CombProcessor::setFrequency(float freq)
+{
+    this->freq.setTargetValue(freq);
+}
+
+void CombProcessor::setCurveOffset(float offset)
+{
+    curve.setTargetValue(curParams.curve + offset);
+}
+
+void CombProcessor::updateParamsObject(float freq, float resonance, float timbre, float curve, float spread)
+{
+    curParams.freq = freq;
+    curParams.resonance = resonance;
+    curParams.timbre = timbre;
+    curParams.curve = curve;
+    curParams.spread = spread;
+    curParams.glide = glide;
+    curParams.mode = mode;
+}
+
+
+
+
+bool CombProcessor::updateFilterSettings(float curFreq, float curQ, float curSpread, int i)
+{
+    float harmFreq, harmQ, nyquist = sampleRate / 2.0f;
+    
+    harmFreq = i ? curFreq * pow(float(i + 1), curSpread) : curFreq;
+    harmQ = curQ * (float(i) / 2.f + 1);
+    
+    if (harmFreq > nyquist)
+    {
+        switch (mode) {
+            case FreqOutOfBoundsMode::Ignore:
+                return false;
+                break;
+                
+            case FreqOutOfBoundsMode::Wrap:
+                while (harmFreq >= nyquist)
+                    harmFreq -= nyquist;
+                
+                harmFreq += 20.0f;
+                break;
+                
+            case FreqOutOfBoundsMode::Fold:
+                while (harmFreq >= nyquist || harmFreq < 20.0f)
+                    harmFreq = (harmFreq - nyquist) - nyquist;
+                break;
+                
+            default:
+                DBG("No mode specified");
+                return false;
+                break;
+        }
+    }
     
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        chain[ch][i].get<ChainPositions::Filter>().setCutoffFrequency(curFreq);
-        chain[ch][i].get<ChainPositions::Filter>().setResonance(curQ);
+        chain[ch][i].get<ChainPositions::Filter>().setCutoffFrequency(harmFreq);
+        chain[ch][i].get<ChainPositions::Filter>().setResonance(harmQ);
     }
+    
+    return true;
 }
 
-void CombProcessor::updateTimbre(int i)
+void CombProcessor::updateTimbre(float curTimbre, int i)
 {
     float oddGain, evenGain;
     
-    oddGain = timbre * -1.f + 1.f;
-    evenGain = timbre;
+    oddGain = -curTimbre + 1.f;
+    evenGain = curTimbre;
     
     for (int ch = 0; ch < numChannels; ++ch)
     {
@@ -144,38 +244,16 @@ void CombProcessor::updateTimbre(int i)
     }
 }
 
-void CombProcessor::updateCurve(int i)
+void CombProcessor::updateCurve(float curCurve, float curQ, int i)
 {
-//    float gain, normCurveGain, curveQ;
-//
-//    curveQ = q * (float(i) / 2.f + 1);
-//
-//    // compensate gain for tighter q values because nonlinear filter
-//    normCurveGain = pow((1.f/curveQ), 0.6);
-//
-//    gain = pow((-1.f / float(MAX_NUM_FILTERS)) * float(i) + 1.f, (1.f / curve));
-//    gain *= normCurveGain;
-//
-//    for (int ch = 0; ch < numChannels; ++ch)
-//        chain[ch][i].get<ChainPositions::Curve>().setGainLinear(gain);
+    float gain, curveQ;
     
-    float gain, normCurveGain, curveQ;
-    
-    gain = Decibels::decibelsToGain( curve * (i + 1) );
-    curveQ = q * (float(i) / 2.f + 1);
-    normCurveGain = pow((1.f/curveQ), 0.6);
-    gain *= normCurveGain;
+    curveQ = curQ * (float(i) / 2.f + 1);
+    gain = Decibels::decibelsToGain( curCurve * i );
+    gain *= pow((1.f/curveQ), 0.6);
     
     for (int ch = 0; ch < numChannels; ++ch)
         chain[ch][i].get<ChainPositions::Curve>().setGainLinear(gain);
-}
-
-float CombProcessor::getCurFreq(int i)
-{
-    if ( i )
-        return freq * pow(float(i + 1), detune);
-    else
-        return freq;
 }
 
 }

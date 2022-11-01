@@ -104,7 +104,7 @@ void TheFineToothAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     filterProcessor->prepare(spec);
     
     // initialize filter params
-    filterProcessor->updateParams(FREQ_DEFAULT, Q_DEFAULT, TIMBRE_DEFAULT, CURVE_DEFAULT, SPREAD_DEFAULT);
+    filterProcessor->updateParams(CombProcessor::Parameters(A4_FREQ, RESONANCE_DEFAULT, TIMBRE_DEFAULT, CURVE_DEFAULT, SPREAD_DEFAULT, RETUNE_DEFAULT));
     
     // initialize buffers
     tempBuffer1.setSize(getTotalNumOutputChannels(), samplesPerBlock);
@@ -180,14 +180,15 @@ void TheFineToothAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     
     float pitch = pitchMPM->getPitch(buffer.getReadPointer(0));
     
-    if (pitch > 0)
-        freqParam.setTargetValue(snapFreq(pitch));
-    
-    float fc = freqParam.getNextValue();
+    float fc;
+    if (pitch < 0)
+        fc = lastFc;
+    else
+        fc = snapFreq(pitch);
     
     freqParam.skip(numSamples - 1);
     
-    filterProcessor->updateParams(fc, settings.q, settings.timbre, settings.curve, settings.detune);
+    filterProcessor->updateParams(CombProcessor::Parameters(fc, settings.resonance, settings.timbre, settings.curve, settings.spread, settings.retuneSpeed));
     
     // update temp buffers
     auto data1 = tempBuffer1.getArrayOfWritePointers();
@@ -240,59 +241,7 @@ float TheFineToothAudioProcessor::snapFreq(float freq)
 
 void TheFineToothAudioProcessor::updateTonic(const ChainSettings &settings)
 {
-    switch (settings.key) {
-        case Key::C:
-            tonic = C4_FREQ;
-            break;
-            
-        case Key::Db:
-            tonic = Db4_FREQ;
-            break;
-            
-        case Key::D:
-            tonic = D4_FREQ;
-            break;
-            
-        case Key::Eb:
-            tonic = Eb4_FREQ;
-            break;
-            
-        case Key::E:
-            tonic = E4_FREQ;
-            break;
-            
-        case Key::F:
-            tonic = F4_FREQ;
-            break;
-            
-        case Key::Gb:
-            tonic = Gb4_FREQ;
-            break;
-            
-        case Key::G:
-            tonic = G4_FREQ;
-            break;
-            
-        case Key::Ab:
-            tonic = Ab4_FREQ;
-            break;
-            
-        case Key::A:
-            tonic = A4_FREQ;
-            break;
-            
-        case Key::Bb:
-            tonic = Bb4_FREQ;
-            break;
-            
-        case Key::B:
-            tonic = B4_FREQ;
-            break;
-            
-        default:
-            DBG("KEY NOT FOUND!!!!");
-            break;
-    }
+    tonic = keyFreqs[settings.key];
 }
 
 void TheFineToothAudioProcessor::updateRetune(const ChainSettings &settings)
@@ -306,6 +255,11 @@ void TheFineToothAudioProcessor::updateRetune(const ChainSettings &settings)
     }
 }
 
+float TheFineToothAudioProcessor::getFreq()
+{
+    return lastFc;
+}
+
 //==============================================================================
 bool TheFineToothAudioProcessor::hasEditor() const
 {
@@ -314,8 +268,8 @@ bool TheFineToothAudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* TheFineToothAudioProcessor::createEditor()
 {
-//    return new TheFineToothAudioProcessorEditor (*this);
-    return new GenericAudioProcessorEditor (*this);
+    return new TheFineToothAudioProcessorEditor (*this);
+//    return new GenericAudioProcessorEditor (*this);
 }
 
 //==============================================================================

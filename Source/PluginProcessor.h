@@ -61,6 +61,8 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
     
+    float getFreq();
+    
     APVTS apvts;
 
 private:
@@ -78,6 +80,22 @@ private:
     float tonic = A4_FREQ, lastFc = A4_FREQ, lastRetune = -1.0f;
     
     std::unique_ptr<adamski::PitchMPM> pitchMPM;
+    
+    std::array<float, 12> keyFreqs =
+    {
+        C4_FREQ,
+        Db4_FREQ,
+        D4_FREQ,
+        Eb4_FREQ,
+        E4_FREQ,
+        F4_FREQ,
+        Gb4_FREQ,
+        G4_FREQ,
+        Ab4_FREQ,
+        A4_FREQ,
+        Bb4_FREQ,
+        B4_FREQ
+    };
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TheFineToothAudioProcessor)
 };

@@ -5,6 +5,16 @@
               companyName="Kevin Kopczynski" cppLanguageStandard="latest" pluginCode="TthA">
   <MAINGROUP id="EHCOIl" name="Auto-Tooth">
     <GROUP id="{BC19EC1D-62BA-0BFE-C466-480537D2AE02}" name="Source">
+      <GROUP id="{30401912-A74E-807F-CE1D-4DEA45843D11}" name="assets">
+        <FILE id="M5kOQ6" name="Comfortaa-Regular.ttf" compile="0" resource="1"
+              file="Source/assets/Comfortaa-Regular.ttf"/>
+      </GROUP>
+      <GROUP id="{6B63C20F-30CD-A798-D8C1-E5AFE9DF0CD2}" name="GUI">
+        <FILE id="nWbGaE" name="FilterDisplay.h" compile="0" resource="0" file="Source/GUI/FilterDisplay.h"/>
+        <FILE id="pV8kZ3" name="FineToothLNF.h" compile="0" resource="0" file="Source/GUI/FineToothLNF.h"/>
+        <FILE id="nKiEC4" name="MultiChoiceButton.h" compile="0" resource="0"
+              file="Source/GUI/MultiChoiceButton.h"/>
+      </GROUP>
       <FILE id="iIVGIQ" name="Params.h" compile="0" resource="0" file="Source/Params.h"/>
       <FILE id="mpdT8T" name="config.h" compile="0" resource="0" file="Source/config.h"/>
       <GROUP id="{160C82BB-7A26-91A4-431B-7B23FC7321C0}" name="audio">
